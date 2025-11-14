@@ -11,6 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	metaJSON bool
+)
+
 var metaCmd = &cobra.Command{
 	Use:   "meta <timestamp> <topic>",
 	Short: "Show metadata for a snapshot",
@@ -24,6 +28,7 @@ Example:
 
 func init() {
 	rootCmd.AddCommand(metaCmd)
+	metaCmd.Flags().BoolVar(&metaJSON, "json", false, "Output as JSON")
 }
 
 func runMeta(cmd *cobra.Command, args []string) error {
@@ -63,7 +68,35 @@ func runMeta(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
-	// Display metadata
+	// Check if snapshot has embedding
+	hasEmbedding := false
+	if metadata.Embedding != "" {
+		embeddingPath := models.ResearchPath(timestamp, topic) + "/" + metadata.Embedding
+		_, err := gitShow(branch, embeddingPath)
+		hasEmbedding = err == nil
+	}
+
+	// Output JSON if requested
+	if metaJSON {
+		type metaOutput struct {
+			Branch       string           `json:"branch"`
+			Metadata     models.Metadata  `json:"metadata"`
+			HasEmbedding bool             `json:"has_embedding"`
+		}
+		output := metaOutput{
+			Branch:       branch,
+			Metadata:     metadata,
+			HasEmbedding: hasEmbedding,
+		}
+		jsonBytes, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonBytes))
+		return nil
+	}
+
+	// Display metadata (human-readable)
 	fmt.Printf("Snapshot: %s\n\n", branch)
 	fmt.Printf("Topic:         %s\n", metadata.Topic)
 	fmt.Printf("Created:       %s\n", metadata.CreatedAt.Format("2006-01-02 15:04:05"))
@@ -79,8 +112,8 @@ func runMeta(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Tree Hash:     %s\n", metadata.TreeHash)
 	}
 
-	if metadata.Embedding != "" {
-		fmt.Printf("Embedding:     %s\n", metadata.Embedding)
+	if hasEmbedding {
+		fmt.Printf("Embedding:     ✓ %s\n", metadata.Embedding)
 	}
 
 	if metadata.Notes != "" {

@@ -229,10 +229,10 @@ func runSave(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Commit the snapshot in the worktree
+	// Commit the snapshot in the worktree (bypass hook since we're creating the snapshot)
 	commitMsg := fmt.Sprintf("snapshot: %s\n\nMode: %s\nFrom: %s @ %s\nTags: %v",
 		topic, mode, currentBranch, currentCommit[:8], saveTags)
-	if err := git.CommitInDir(worktreePath, commitMsg); err != nil {
+	if err := git.CommitInDirNoVerify(worktreePath, commitMsg); err != nil {
 		return fmt.Errorf("failed to commit snapshot: %w", err)
 	}
 

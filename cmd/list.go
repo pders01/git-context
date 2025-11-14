@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -16,6 +17,7 @@ var (
 	listTopic string
 	listToday bool
 	listSince string
+	listJSON  bool
 )
 
 var listCmd = &cobra.Command{
@@ -37,6 +39,7 @@ func init() {
 	listCmd.Flags().StringVar(&listTopic, "topic", "", "Filter by topic")
 	listCmd.Flags().BoolVar(&listToday, "today", false, "Show only today's snapshots")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Show snapshots since date (YYYY-MM-DD)")
+	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -108,15 +111,30 @@ func runList(cmd *cobra.Command, args []string) error {
 		return snapshots[i].Timestamp.After(snapshots[j].Timestamp)
 	})
 
-	// Display snapshots
+	// Load metadata for all snapshots
+	for i := range snapshots {
+		snapshots[i].LoadMetadata()
+	}
+
+	// Output JSON if requested
+	if listJSON {
+		output, err := json.MarshalIndent(snapshots, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(output))
+		return nil
+	}
+
+	// Display snapshots (human-readable)
 	fmt.Printf("Found %d snapshot(s):\n\n", len(snapshots))
 	for _, s := range snapshots {
 		fmt.Printf("  %s\n", s.Branch)
 		fmt.Printf("    Topic:   %s\n", s.Topic)
 		fmt.Printf("    Created: %s\n", s.Timestamp.Format("2006-01-02 15:04"))
 
-		// Try to load metadata for additional info
-		if meta := s.LoadMetadata(); meta != nil {
+		// Show metadata if available
+		if meta := s.Metadata; meta != nil {
 			fmt.Printf("    Mode:    %s\n", meta.Mode)
 			if len(meta.Tags) > 0 {
 				fmt.Printf("    Tags:    %v\n", meta.Tags)
@@ -128,6 +146,10 @@ func runList(cmd *cobra.Command, args []string) error {
 				}
 				fmt.Printf("    Notes:   %s\n", notes)
 			}
+			// Show embedding status
+			if s.HasEmbedding {
+				fmt.Printf("    Embedding: ✓\n")
+			}
 		}
 		fmt.Println()
 	}
@@ -136,19 +158,39 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 type snapshotInfo struct {
-	Branch    string
-	Timestamp time.Time
-	Topic     string
+	Branch      string             `json:"branch"`
+	Timestamp   time.Time          `json:"timestamp"`
+	Topic       string             `json:"topic"`
+	Metadata    *models.Metadata   `json:"metadata,omitempty"`
+	HasEmbedding bool              `json:"has_embedding"`
 }
 
 func (s *snapshotInfo) LoadMetadata() *models.Metadata {
-	metaPath := models.MetadataPath(s.Timestamp, s.Topic)
+	if s.Metadata != nil {
+		return s.Metadata
+	}
 
-	// We need to check out the branch to read the file
-	// For now, we'll skip this to avoid branch switching
-	// TODO: Use git show to read file without checkout
-	_ = metaPath
-	return nil
+	metaPath := models.MetadataPath(s.Timestamp, s.Topic)
+	metaContent, err := gitShow(s.Branch, metaPath)
+	if err != nil {
+		return nil
+	}
+
+	var metadata models.Metadata
+	if err := json.Unmarshal([]byte(metaContent), &metadata); err != nil {
+		return nil
+	}
+
+	s.Metadata = &metadata
+
+	// Check if snapshot has embedding
+	if metadata.Embedding != "" {
+		embeddingPath := models.ResearchPath(s.Timestamp, s.Topic) + "/" + metadata.Embedding
+		_, err := gitShow(s.Branch, embeddingPath)
+		s.HasEmbedding = err == nil
+	}
+
+	return &metadata
 }
 
 func parseSnapshotBranch(branch string) (snapshotInfo, error) {
@@ -172,16 +214,4 @@ func parseSnapshotBranch(branch string) (snapshotInfo, error) {
 		Timestamp: timestamp,
 		Topic:     parts[2],
 	}, nil
-}
-
-// readMetadataFromBranch reads metadata from a branch without checking it out
-func readMetadataFromBranch(branch string, metaPath string) (*models.Metadata, error) {
-	// Use git show to read file content
-	// This is a helper function for future use
-	_ = branch
-	_ = metaPath
-
-	// For now, return nil
-	// TODO: Implement using git show
-	return nil, nil
 }

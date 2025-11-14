@@ -66,7 +66,6 @@ func initConfig() {
 	viper.SetDefault("search.keyword_weight", 0.3)
 	viper.SetDefault("search.semantic_weight", 0.7)
 
-	if err := viper.ReadInConfig(); err == nil {
-		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())
-	}
+	// Read config silently (config errors are not critical)
+	viper.ReadInConfig()
 }

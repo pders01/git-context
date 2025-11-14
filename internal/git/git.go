@@ -201,8 +201,20 @@ func AddFilesInDir(dir string, files ...string) error {
 func CommitInDir(dir, message string) error {
 	cmd := exec.Command("git", "commit", "-m", message)
 	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to commit: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to commit: %w\nOutput: %s", err, string(output))
+	}
+	return nil
+}
+
+// CommitInDirNoVerify creates a commit bypassing hooks (used for snapshot creation)
+func CommitInDirNoVerify(dir, message string) error {
+	cmd := exec.Command("git", "commit", "--no-verify", "-m", message)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to commit: %w\nOutput: %s", err, string(output))
 	}
 	return nil
 }

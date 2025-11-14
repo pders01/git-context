@@ -18,6 +18,7 @@ import (
 
 var (
 	searchTopic string
+	searchJSON  bool
 )
 
 var searchCmd = &cobra.Command{
@@ -43,6 +44,7 @@ func init() {
 	rootCmd.AddCommand(searchCmd)
 
 	searchCmd.Flags().StringVar(&searchTopic, "topic", "", "Filter by topic")
+	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output as JSON")
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -74,12 +76,14 @@ func runSearch(cmd *cobra.Command, args []string) error {
 			queryEmbedding, err = client.GenerateEmbedding(query)
 			if err == nil {
 				useSemanticSearch = true
-				fmt.Println("Using hybrid search (keyword + semantic)")
+				if !searchJSON {
+					fmt.Println("Using hybrid search (keyword + semantic)")
+				}
 			}
 		}
 	}
 
-	if !useSemanticSearch {
+	if !useSemanticSearch && !searchJSON {
 		fmt.Println("Using keyword search only")
 	}
 
@@ -183,7 +187,17 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return results[i].Score > results[j].Score
 	})
 
-	// Display results
+	// Output JSON if requested
+	if searchJSON {
+		output, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(output))
+		return nil
+	}
+
+	// Display results (human-readable)
 	fmt.Printf("\nFound %d matching snapshot(s):\n\n", len(results))
 	for i, r := range results {
 		scoreDisplay := fmt.Sprintf("%.1f", r.Score)
@@ -216,13 +230,13 @@ func runSearch(cmd *cobra.Command, args []string) error {
 }
 
 type searchResult struct {
-	Info            snapshotInfo
-	Metadata        models.Metadata
-	Score           float64
-	KeywordScore    int
-	SemanticScore   float64
-	HasEmbedding    bool
-	UsedSemantic    bool
+	Info            snapshotInfo      `json:"info"`
+	Metadata        models.Metadata   `json:"metadata"`
+	Score           float64           `json:"score"`
+	KeywordScore    int               `json:"keyword_score"`
+	SemanticScore   float64           `json:"semantic_score"`
+	HasEmbedding    bool              `json:"has_embedding"`
+	UsedSemantic    bool              `json:"used_semantic"`
 }
 
 func calculateRelevance(queryWords []string, metadata *models.Metadata) int {
