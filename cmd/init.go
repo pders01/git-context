@@ -95,6 +95,15 @@ preserve_tags = ["important", "security", "architecture"]
 [snapshot]
 default_mode = "full"
 research_dir = "research"
+
+[embeddings]
+enabled = true
+model = "nomic-embed-text"
+ollama_url = "http://localhost:11434"
+
+[search]
+keyword_weight = 0.3
+semantic_weight = 0.7
 `
 
 		if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {

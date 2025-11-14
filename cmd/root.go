@@ -60,6 +60,11 @@ func initConfig() {
 	viper.SetDefault("retention.preserve_tags", []string{"important"})
 	viper.SetDefault("snapshot.default_mode", "full")
 	viper.SetDefault("snapshot.research_dir", "research")
+	viper.SetDefault("embeddings.enabled", true)
+	viper.SetDefault("embeddings.model", "nomic-embed-text")
+	viper.SetDefault("embeddings.ollama_url", "http://localhost:11434")
+	viper.SetDefault("search.keyword_weight", 0.3)
+	viper.SetDefault("search.semantic_weight", 0.7)
 
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Fprintln(os.Stderr, "Using config file:", viper.ConfigFileUsed())

@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/paulderscheid/git-context/internal/config"
+	"github.com/paulderscheid/git-context/internal/embeddings"
 	"github.com/paulderscheid/git-context/internal/git"
 	"github.com/paulderscheid/git-context/internal/models"
+	"github.com/paulderscheid/git-context/internal/ollama"
 	"github.com/spf13/cobra"
 )
 
@@ -164,6 +166,15 @@ func runSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write metadata: %w", err)
 	}
 
+	// Generate embeddings if enabled
+	if !saveNoEmbed && config.GetEmbeddingsEnabled() {
+		if err := generateEmbedding(metadata, worktreeResearchPath, notesContent); err != nil {
+			// Don't fail the snapshot, just warn
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate embedding: %v\n", err)
+			fmt.Fprintln(os.Stderr, "Tip: Ensure Ollama is running and the model is available: ollama pull nomic-embed-text")
+		}
+	}
+
 	// Handle different modes in the worktree
 	switch mode {
 	case models.ModeFull:
@@ -252,4 +263,95 @@ func isValidMode(mode models.SnapshotMode) bool {
 	default:
 		return false
 	}
+}
+
+// generateEmbedding generates and stores an embedding for a snapshot
+func generateEmbedding(metadata *models.Metadata, researchPath, notesContent string) error {
+	// Check if Ollama is available
+	ollamaURL := config.GetOllamaURL()
+	if !ollama.IsAvailable(ollamaURL) {
+		return fmt.Errorf("Ollama is not available at %s", ollamaURL)
+	}
+
+	fmt.Println("  Generating embedding...")
+
+	// Create Ollama client
+	model := config.GetEmbeddingModel()
+	client, err := ollama.NewClient(ollamaURL, model)
+	if err != nil {
+		return fmt.Errorf("failed to create Ollama client: %w", err)
+	}
+
+	// Check if model is available
+	if err := client.CheckModel(); err != nil {
+		return err
+	}
+
+	// Build text to embed: notes.md content + metadata
+	embeddingText := buildEmbeddingText(metadata, notesContent)
+
+	// Truncate if too long (nomic-embed-text supports ~8K tokens, roughly 32K chars)
+	maxChars := 30000
+	if len(embeddingText) > maxChars {
+		embeddingText = embeddingText[:maxChars]
+		fmt.Printf("  Note: Truncated text to %d characters for embedding\n", maxChars)
+	}
+
+	// Generate embedding
+	vec, err := client.GenerateEmbedding(embeddingText)
+	if err != nil {
+		return fmt.Errorf("failed to generate embedding: %w", err)
+	}
+
+	// Validate embedding
+	if err := embeddings.ValidateEmbedding(vec); err != nil {
+		return fmt.Errorf("invalid embedding: %w", err)
+	}
+
+	// Write embedding to file
+	embeddingPath := filepath.Join(researchPath, "embedding.bin")
+	if err := embeddings.WriteEmbedding(embeddingPath, vec); err != nil {
+		return fmt.Errorf("failed to write embedding: %w", err)
+	}
+
+	// Update metadata to reference embedding
+	metadata.Embedding = "embedding.bin"
+
+	// Re-write metadata with embedding reference
+	metaPath := filepath.Join(researchPath, "meta.json")
+	metaBytes, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	if err := os.WriteFile(metaPath, metaBytes, 0644); err != nil {
+		return fmt.Errorf("failed to update metadata: %w", err)
+	}
+
+	fmt.Printf("  ✓ Embedding generated (%d dimensions)\n", len(vec))
+
+	return nil
+}
+
+// buildEmbeddingText constructs the text to be embedded from metadata and notes
+func buildEmbeddingText(metadata *models.Metadata, notesContent string) string {
+	// Combine topic, tags, notes field, and notes.md content
+	var parts []string
+
+	// Add topic
+	parts = append(parts, "Topic: "+metadata.Topic)
+
+	// Add tags
+	if len(metadata.Tags) > 0 {
+		parts = append(parts, "Tags: "+strings.Join(metadata.Tags, ", "))
+	}
+
+	// Add notes from metadata
+	if metadata.Notes != "" {
+		parts = append(parts, "Notes: "+metadata.Notes)
+	}
+
+	// Add full notes.md content
+	parts = append(parts, notesContent)
+
+	return strings.Join(parts, "\n\n")
 }
