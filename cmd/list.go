@@ -20,7 +20,7 @@ var (
 	listSince   string
 	listJSON    bool
 	listToon    bool
-	listTag     string
+	listTags    []string
 	listGroupBy string
 )
 
@@ -33,6 +33,7 @@ Examples:
   context list
   context list --topic security
   context list --tag important
+  context list --tag security --tag important  # AND: both tags required
   context list --today
   context list --since 2025-10-01
   context list --group-by tag
@@ -44,7 +45,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 
 	listCmd.Flags().StringVar(&listTopic, "topic", "", "Filter by topic")
-	listCmd.Flags().StringVar(&listTag, "tag", "", "Filter by tag")
+	listCmd.Flags().StringSliceVar(&listTags, "tag", []string{}, "Filter by tag(s) - multiple tags use AND logic")
 	listCmd.Flags().BoolVar(&listToday, "today", false, "Show only today's snapshots")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Show snapshots since date (YYYY-MM-DD)")
 	listCmd.Flags().StringVar(&listGroupBy, "group-by", "", "Group output by: tag, date, or mode")
@@ -126,17 +127,32 @@ func runList(cmd *cobra.Command, args []string) error {
 		snapshots[i].LoadMetadata()
 	}
 
-	// Apply tag filter (needs metadata loaded)
-	if listTag != "" {
+	// Apply tag filter (needs metadata loaded) - AND logic for multiple tags
+	if len(listTags) > 0 {
 		var filtered []snapshotInfo
 		for _, s := range snapshots {
-			if s.Metadata != nil {
-				for _, tag := range s.Metadata.Tags {
-					if tag == listTag {
-						filtered = append(filtered, s)
+			if s.Metadata == nil {
+				continue
+			}
+
+			// Check if snapshot has ALL required tags (AND logic)
+			hasAllTags := true
+			for _, requiredTag := range listTags {
+				found := false
+				for _, snapshotTag := range s.Metadata.Tags {
+					if snapshotTag == requiredTag {
+						found = true
 						break
 					}
 				}
+				if !found {
+					hasAllTags = false
+					break
+				}
+			}
+
+			if hasAllTags {
+				filtered = append(filtered, s)
 			}
 		}
 		snapshots = filtered
