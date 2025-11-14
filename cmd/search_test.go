@@ -162,8 +162,12 @@ func TestCalculateRelevance(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			queryWords := splitQueryWords(tt.query)
-			score := calculateRelevance(queryWords, tt.metadata)
+			parsedQuery := parseSearchQuery(tt.query)
+			score, shouldExclude := calculateRelevance(parsedQuery, tt.metadata)
+
+			if shouldExclude {
+				t.Errorf("unexpected exclusion for query: %s", tt.query)
+			}
 
 			if score < tt.minScore {
 				t.Errorf("expected score >= %d, got %d", tt.minScore, score)
