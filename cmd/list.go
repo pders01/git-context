@@ -44,6 +44,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not a git repository")
 	}
 
+	// Validate --since date format early
+	if listSince != "" {
+		_, err := time.Parse("2006-01-02", listSince)
+		if err != nil {
+			return fmt.Errorf("invalid --since date format (use YYYY-MM-DD): %w", err)
+		}
+	}
+
 	// Get all snapshot branches
 	branches, err := git.ListBranches("snapshot/*")
 	if err != nil {
