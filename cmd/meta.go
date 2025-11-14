@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/alpkeskin/gotoon"
 	"github.com/pders01/git-context/internal/git"
 	"github.com/pders01/git-context/internal/models"
 	"github.com/spf13/cobra"
@@ -13,6 +14,7 @@ import (
 
 var (
 	metaJSON bool
+	metaToon bool
 )
 
 var metaCmd = &cobra.Command{
@@ -29,6 +31,7 @@ Example:
 func init() {
 	rootCmd.AddCommand(metaCmd)
 	metaCmd.Flags().BoolVar(&metaJSON, "json", false, "Output as JSON")
+	metaCmd.Flags().BoolVar(&metaToon, "toon", false, "Output in LLM-friendly toon format")
 }
 
 func runMeta(cmd *cobra.Command, args []string) error {
@@ -93,6 +96,26 @@ func runMeta(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
 		fmt.Println(string(jsonBytes))
+		return nil
+	}
+
+	// Output Toon if requested
+	if metaToon {
+		type metaOutput struct {
+			Branch       string           `json:"branch"`
+			Metadata     models.Metadata  `json:"metadata"`
+			HasEmbedding bool             `json:"has_embedding"`
+		}
+		output := metaOutput{
+			Branch:       branch,
+			Metadata:     metadata,
+			HasEmbedding: hasEmbedding,
+		}
+		toonOutput, err := gotoon.Encode(output)
+		if err != nil {
+			return fmt.Errorf("failed to encode Toon: %w", err)
+		}
+		fmt.Println(toonOutput)
 		return nil
 	}
 

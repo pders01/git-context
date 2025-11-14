@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/alpkeskin/gotoon"
 	"github.com/pders01/git-context/internal/config"
 	"github.com/pders01/git-context/internal/embeddings"
 	"github.com/pders01/git-context/internal/git"
@@ -19,6 +20,7 @@ import (
 var (
 	searchTopic string
 	searchJSON  bool
+	searchToon  bool
 )
 
 var searchCmd = &cobra.Command{
@@ -29,11 +31,19 @@ var searchCmd = &cobra.Command{
 Combines keyword matching with semantic similarity (if embeddings available).
 Automatically uses semantic search when snapshots have embeddings.
 
-Example:
+Boolean Search Operators:
+  +term        Required term (must be present)
+  -term        Excluded term (must NOT be present)
+  "exact"      Exact phrase match
+  word         Normal term (adds to score if present)
+
+Examples:
   context search "security vulnerabilities"
+  context search +ollama +embedding -deprecated
+  context search "authentication bug" +security -false-positive
   context search --topic parser "fragility"
 
-Search modes:
+Search Modes:
   - Keyword only: When embeddings unavailable or Ollama not running
   - Hybrid: Combines keyword (30%) + semantic (70%) when embeddings available`,
 	Args: cobra.ExactArgs(1),
@@ -45,6 +55,63 @@ func init() {
 
 	searchCmd.Flags().StringVar(&searchTopic, "topic", "", "Filter by topic")
 	searchCmd.Flags().BoolVar(&searchJSON, "json", false, "Output as JSON")
+	searchCmd.Flags().BoolVar(&searchToon, "toon", false, "Output in LLM-friendly toon format")
+}
+
+type searchQuery struct {
+	required []string   // +term (must include)
+	excluded []string   // -term (must exclude)
+	phrases  []string   // "exact phrase"
+	normal   []string   // regular terms
+}
+
+func parseSearchQuery(query string) searchQuery {
+	sq := searchQuery{}
+
+	// Extract exact phrases first
+	inQuote := false
+	currentPhrase := ""
+	remaining := ""
+
+	for i := 0; i < len(query); i++ {
+		if query[i] == '"' {
+			if inQuote {
+				if currentPhrase != "" {
+					sq.phrases = append(sq.phrases, strings.ToLower(currentPhrase))
+				}
+				currentPhrase = ""
+				inQuote = false
+			} else {
+				inQuote = true
+			}
+		} else if inQuote {
+			currentPhrase += string(query[i])
+		} else {
+			remaining += string(query[i])
+		}
+	}
+
+	// Parse remaining terms (with + and - prefixes)
+	words := strings.Fields(remaining)
+	for _, word := range words {
+		if len(word) == 0 {
+			continue
+		}
+
+		if word[0] == '+' {
+			if len(word) > 1 {
+				sq.required = append(sq.required, strings.ToLower(word[1:]))
+			}
+		} else if word[0] == '-' {
+			if len(word) > 1 {
+				sq.excluded = append(sq.excluded, strings.ToLower(word[1:]))
+			}
+		} else {
+			sq.normal = append(sq.normal, strings.ToLower(word))
+		}
+	}
+
+	return sq
 }
 
 func runSearch(cmd *cobra.Command, args []string) error {
@@ -53,7 +120,10 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	}
 
 	query := args[0]
-	queryWords := strings.Fields(strings.ToLower(query))
+	parsedQuery := parseSearchQuery(query)
+
+	// For embedding generation, use the full query text
+	embeddingQuery := query
 
 	// Get all snapshot branches
 	branches, err := git.ListBranches("snapshot/*")
@@ -73,17 +143,17 @@ func runSearch(cmd *cobra.Command, args []string) error {
 	if config.GetEmbeddingsEnabled() && ollama.IsAvailable(config.GetOllamaURL()) {
 		client, err := ollama.NewClient(config.GetOllamaURL(), config.GetEmbeddingModel())
 		if err == nil {
-			queryEmbedding, err = client.GenerateEmbedding(query)
+			queryEmbedding, err = client.GenerateEmbedding(embeddingQuery)
 			if err == nil {
 				useSemanticSearch = true
-				if !searchJSON {
+				if !searchJSON && !searchToon {
 					fmt.Println("Using hybrid search (keyword + semantic)")
 				}
 			}
 		}
 	}
 
-	if !useSemanticSearch && !searchJSON {
+	if !useSemanticSearch && !searchJSON && !searchToon {
 		fmt.Println("Using keyword search only")
 	}
 
@@ -116,8 +186,11 @@ func runSearch(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Calculate keyword relevance score
-		keywordScore := calculateRelevance(queryWords, &metadata)
+		// Calculate keyword relevance score with boolean operators
+		keywordScore, shouldExclude := calculateRelevance(parsedQuery, &metadata)
+		if shouldExclude {
+			continue
+		}
 
 		// Try to calculate semantic similarity
 		var semanticScore float64
@@ -197,6 +270,16 @@ func runSearch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	// Output Toon if requested
+	if searchToon {
+		output, err := gotoon.Encode(results)
+		if err != nil {
+			return fmt.Errorf("failed to encode Toon: %w", err)
+		}
+		fmt.Println(output)
+		return nil
+	}
+
 	// Display results (human-readable)
 	fmt.Printf("\nFound %d matching snapshot(s):\n\n", len(results))
 	for i, r := range results {
@@ -239,8 +322,7 @@ type searchResult struct {
 	UsedSemantic    bool              `json:"used_semantic"`
 }
 
-func calculateRelevance(queryWords []string, metadata *models.Metadata) int {
-	score := 0
+func calculateRelevance(query searchQuery, metadata *models.Metadata) (int, bool) {
 	searchableText := strings.ToLower(fmt.Sprintf("%s %s %s %v",
 		metadata.Topic,
 		metadata.Notes,
@@ -248,9 +330,34 @@ func calculateRelevance(queryWords []string, metadata *models.Metadata) int {
 		metadata.Tags,
 	))
 
-	for _, word := range queryWords {
+	// Check excluded terms first (must NOT contain)
+	for _, excluded := range query.excluded {
+		if strings.Contains(searchableText, excluded) {
+			return 0, true // shouldExclude
+		}
+	}
+
+	// Check required terms (must ALL be present)
+	for _, required := range query.required {
+		if !strings.Contains(searchableText, required) {
+			return 0, true // shouldExclude
+		}
+	}
+
+	// Check exact phrases (must ALL be present)
+	for _, phrase := range query.phrases {
+		if !strings.Contains(searchableText, phrase) {
+			return 0, true // shouldExclude
+		}
+	}
+
+	// Calculate score from normal and required terms
+	score := 0
+	allTerms := append(query.normal, query.required...)
+
+	for _, word := range allTerms {
 		// Count occurrences of each query word
-		count := strings.Count(searchableText, strings.ToLower(word))
+		count := strings.Count(searchableText, word)
 		score += count * 10
 
 		// Bonus points for exact matches in topic
@@ -266,5 +373,15 @@ func calculateRelevance(queryWords []string, metadata *models.Metadata) int {
 		}
 	}
 
-	return score
+	// Bonus for exact phrase matches
+	for _, phrase := range query.phrases {
+		if strings.Contains(searchableText, phrase) {
+			score += 100 // High bonus for exact phrase match
+		}
+		if strings.Contains(strings.ToLower(metadata.Topic), phrase) {
+			score += 150 // Even higher for phrase in topic
+		}
+	}
+
+	return score, false // don't exclude
 }

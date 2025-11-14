@@ -3,6 +3,8 @@ module github.com/pders01/git-context
 go 1.25.4
 
 require (
+	github.com/BurntSushi/toml v1.5.0 // indirect
+	github.com/alpkeskin/gotoon v0.1.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/pders01/git-context/internal/config"
 	"github.com/pders01/git-context/internal/embeddings"
 	"github.com/pders01/git-context/internal/git"
@@ -23,6 +24,7 @@ var (
 	saveTags       []string
 	saveNoEmbed    bool
 	saveNotes      string
+	saveBatch      string
 )
 
 var saveCmd = &cobra.Command{
@@ -37,7 +39,11 @@ Modes:
   full (default)    - Full code tree + research artifacts
   research-only     - Only research/ + reference commit hash
   diff              - Store patch + research/ + reference commit
-  poc               - Only POC files + reference commit`,
+  poc               - Only POC files + reference commit
+
+Batch Mode:
+  Use --batch <file.toml> to create multiple snapshots from a config file.
+  See example-batch.toml for format.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runSave,
 }
@@ -51,6 +57,22 @@ func init() {
 	saveCmd.Flags().StringSliceVar(&saveTags, "tag", []string{}, "Add metadata tags")
 	saveCmd.Flags().BoolVar(&saveNoEmbed, "no-embed", false, "Skip embedding generation")
 	saveCmd.Flags().StringVar(&saveNotes, "notes", "", "Optional notes")
+	saveCmd.Flags().StringVar(&saveBatch, "batch", "", "Batch create snapshots from TOML config file")
+}
+
+// batchConfig represents the TOML config for batch snapshot creation
+type batchConfig struct {
+	Snapshots []snapshotSpec `toml:"snapshot"`
+}
+
+// snapshotSpec defines a single snapshot in batch mode
+type snapshotSpec struct {
+	Topic    string   `toml:"topic"`
+	Mode     string   `toml:"mode"`
+	Include  []string `toml:"include"`
+	Tags     []string `toml:"tags"`
+	Notes    string   `toml:"notes"`
+	NoEmbed  bool     `toml:"no_embed"`
 }
 
 func runSave(cmd *cobra.Command, args []string) error {
@@ -59,6 +81,12 @@ func runSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not a git repository")
 	}
 
+	// Handle batch mode
+	if saveBatch != "" {
+		return runBatchSave(saveBatch)
+	}
+
+	// Single snapshot mode
 	// Get or generate topic
 	topic := saveTopic
 	if topic == "" && len(args) > 0 {
@@ -354,4 +382,210 @@ func buildEmbeddingText(metadata *models.Metadata, notesContent string) string {
 	parts = append(parts, notesContent)
 
 	return strings.Join(parts, "\n\n")
+}
+
+// runBatchSave creates multiple snapshots from a TOML config file
+func runBatchSave(batchFile string) error {
+	// Read batch config file
+	var cfg batchConfig
+	if _, err := toml.DecodeFile(batchFile, &cfg); err != nil {
+		return fmt.Errorf("failed to read batch config: %w", err)
+	}
+
+	if len(cfg.Snapshots) == 0 {
+		return fmt.Errorf("no snapshots defined in batch config")
+	}
+
+	fmt.Printf("Batch mode: creating %d snapshot(s) from %s\n\n", len(cfg.Snapshots), batchFile)
+
+	// Track success/failure
+	var succeeded, failed int
+
+	for i, spec := range cfg.Snapshots {
+		fmt.Printf("[%d/%d] Creating snapshot: %s\n", i+1, len(cfg.Snapshots), spec.Topic)
+
+		// Create snapshot with spec
+		if err := createSnapshot(spec); err != nil {
+			fmt.Fprintf(os.Stderr, "  ✗ Failed: %v\n\n", err)
+			failed++
+			continue
+		}
+
+		fmt.Printf("  ✓ Success\n\n")
+		succeeded++
+	}
+
+	// Summary
+	fmt.Printf("Batch complete: %d succeeded, %d failed\n", succeeded, failed)
+
+	if failed > 0 {
+		return fmt.Errorf("batch completed with %d failure(s)", failed)
+	}
+
+	return nil
+}
+
+// createSnapshot creates a single snapshot from a spec (used by both single and batch modes)
+func createSnapshot(spec snapshotSpec) error {
+	// Validate topic
+	topic := slugify(spec.Topic)
+	if topic == "" {
+		return fmt.Errorf("topic is required")
+	}
+
+	// Get mode
+	mode := models.SnapshotMode(spec.Mode)
+	if mode == "" {
+		mode = config.GetDefaultMode()
+	}
+
+	// Validate mode
+	if !isValidMode(mode) {
+		return fmt.Errorf("invalid mode: %s (must be: full, research-only, diff, poc)", mode)
+	}
+
+	// Get current state
+	currentBranch, err := git.GetCurrentBranch()
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	currentCommit, err := git.GetCurrentCommit()
+	if err != nil {
+		return fmt.Errorf("failed to get current commit: %w", err)
+	}
+
+	treeHash, err := git.GetTreeHash()
+	if err != nil {
+		return fmt.Errorf("failed to get tree hash: %w", err)
+	}
+
+	// Create snapshot
+	timestamp := time.Now()
+	snapshotBranch := models.BranchName(timestamp, topic)
+
+	// Check if branch already exists
+	if git.BranchExists(snapshotBranch) {
+		return fmt.Errorf("snapshot branch already exists: %s (snapshots are immutable)", snapshotBranch)
+	}
+
+	// Create snapshot branch
+	if err := git.CreateBranch(snapshotBranch); err != nil {
+		return err
+	}
+
+	// Create temporary worktree
+	worktreePath := filepath.Join(os.TempDir(), fmt.Sprintf("context-snapshot-%d", timestamp.Unix()))
+
+	if err := git.CreateWorktree(worktreePath, snapshotBranch); err != nil {
+		return err
+	}
+
+	// Ensure cleanup
+	defer func() {
+		if err := git.RemoveWorktree(worktreePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
+		}
+	}()
+
+	// Create research directory
+	researchPath := models.ResearchPath(timestamp, topic)
+	worktreeResearchPath := filepath.Join(worktreePath, researchPath)
+	if err := os.MkdirAll(worktreeResearchPath, 0755); err != nil {
+		return fmt.Errorf("failed to create research directory: %w", err)
+	}
+
+	// Create notes.md
+	notesPath := filepath.Join(worktreeResearchPath, "notes.md")
+	notesContent := fmt.Sprintf("# %s\n\nCreated: %s\nBranch: %s\nCommit: %s\n\n## Notes\n\n%s\n",
+		topic, timestamp.Format(time.RFC3339), currentBranch, currentCommit, spec.Notes)
+	if err := os.WriteFile(notesPath, []byte(notesContent), 0644); err != nil {
+		return fmt.Errorf("failed to create notes.md: %w", err)
+	}
+
+	// Create metadata
+	metadata := &models.Metadata{
+		CreatedAt:     timestamp,
+		Topic:         topic,
+		Root:          snapshotBranch,
+		Mode:          mode,
+		RelatedBranch: currentBranch,
+		MainCommit:    currentCommit,
+		Tags:          spec.Tags,
+		Notes:         spec.Notes,
+		TreeHash:      treeHash,
+	}
+
+	// Save metadata
+	metaPath := filepath.Join(worktreeResearchPath, "meta.json")
+	metaBytes, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	if err := os.WriteFile(metaPath, metaBytes, 0644); err != nil {
+		return fmt.Errorf("failed to write metadata: %w", err)
+	}
+
+	// Generate embeddings if enabled
+	if !spec.NoEmbed && config.GetEmbeddingsEnabled() {
+		if err := generateEmbedding(metadata, worktreeResearchPath, notesContent); err != nil {
+			// Don't fail the snapshot, just warn
+			fmt.Fprintf(os.Stderr, "  Warning: failed to generate embedding: %v\n", err)
+		}
+	}
+
+	// Handle different modes
+	switch mode {
+	case models.ModeFull:
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
+			return err
+		}
+
+	case models.ModeResearchOnly:
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
+			return err
+		}
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
+			return err
+		}
+
+	case models.ModeDiff:
+		diff, err := git.GetDiff(currentCommit)
+		if err != nil {
+			return fmt.Errorf("failed to get diff: %w", err)
+		}
+		patchPath := filepath.Join(worktreeResearchPath, "changes.patch")
+		if err := os.WriteFile(patchPath, []byte(diff), 0644); err != nil {
+			return fmt.Errorf("failed to write patch: %w", err)
+		}
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
+			return err
+		}
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
+			return err
+		}
+
+	case models.ModePOC:
+		if len(spec.Include) == 0 {
+			return fmt.Errorf("poc mode requires include files to be specified")
+		}
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
+			return err
+		}
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
+			return err
+		}
+		if err := git.AddFilesInDir(worktreePath, spec.Include...); err != nil {
+			return err
+		}
+	}
+
+	// Commit the snapshot
+	commitMsg := fmt.Sprintf("snapshot: %s\n\nMode: %s\nFrom: %s @ %s\nTags: %v",
+		topic, mode, currentBranch, currentCommit[:8], spec.Tags)
+	if err := git.CommitInDirNoVerify(worktreePath, commitMsg); err != nil {
+		return fmt.Errorf("failed to commit snapshot: %w", err)
+	}
+
+	return nil
 }

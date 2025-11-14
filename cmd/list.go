@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alpkeskin/gotoon"
 	"github.com/pders01/git-context/internal/git"
 	"github.com/pders01/git-context/internal/models"
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ var (
 	listToday bool
 	listSince string
 	listJSON  bool
+	listToon  bool
 )
 
 var listCmd = &cobra.Command{
@@ -40,6 +42,7 @@ func init() {
 	listCmd.Flags().BoolVar(&listToday, "today", false, "Show only today's snapshots")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Show snapshots since date (YYYY-MM-DD)")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
+	listCmd.Flags().BoolVar(&listToon, "toon", false, "Output in LLM-friendly toon format")
 }
 
 func runList(cmd *cobra.Command, args []string) error {
@@ -123,6 +126,16 @@ func runList(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to marshal JSON: %w", err)
 		}
 		fmt.Println(string(output))
+		return nil
+	}
+
+	// Output Toon if requested
+	if listToon {
+		output, err := gotoon.Encode(snapshots)
+		if err != nil {
+			return fmt.Errorf("failed to encode Toon: %w", err)
+		}
+		fmt.Println(output)
 		return nil
 	}
 

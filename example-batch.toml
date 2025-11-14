@@ -1,0 +1,31 @@
+# Example batch configuration for creating multiple snapshots
+# Usage: context save --batch example-batch.toml
+
+[[snapshot]]
+topic = "security-audit"
+mode = "full"
+tags = ["security", "important"]
+notes = "Initial security audit findings and recommendations"
+no_embed = false
+
+[[snapshot]]
+topic = "performance-test"
+mode = "research-only"
+tags = ["performance", "benchmarks"]
+notes = "Performance benchmarking results and analysis"
+no_embed = false
+
+[[snapshot]]
+topic = "bug-fix-auth"
+mode = "diff"
+tags = ["bugfix", "authentication"]
+notes = "Fixed authentication bypass vulnerability"
+no_embed = false
+
+[[snapshot]]
+topic = "poc-exploit"
+mode = "poc"
+tags = ["security", "poc"]
+notes = "Proof of concept for the discovered vulnerability"
+include = ["exploit.py", "test_exploit.sh"]
+no_embed = false
