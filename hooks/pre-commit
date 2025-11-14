@@ -1,0 +1,13 @@
+#!/bin/sh
+# Git hook to prevent commits on snapshot branches
+# This ensures snapshot immutability
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+
+if echo "$branch" | grep -q "^snapshot/"; then
+    echo "ERROR: Snapshots are immutable. Cannot commit to snapshot branch: $branch"
+    echo "Create a new snapshot instead with: context save <topic>"
+    exit 1
+fi
+
+exit 0

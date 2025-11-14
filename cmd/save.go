@@ -77,7 +77,7 @@ func runSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid mode: %s (must be: full, research-only, diff, poc)", mode)
 	}
 
-	// Get current state
+	// Get current state BEFORE creating anything
 	currentBranch, err := git.GetCurrentBranch()
 	if err != nil {
 		return fmt.Errorf("failed to get current branch: %w", err)
@@ -106,31 +106,35 @@ func runSave(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Mode: %s\n", mode)
 	fmt.Printf("From: %s @ %s\n", currentBranch, currentCommit[:8])
 
-	// Create snapshot branch
+	// Create snapshot branch (but don't checkout)
 	if err := git.CreateBranch(snapshotBranch); err != nil {
 		return err
 	}
 
-	// Checkout snapshot branch
-	if err := git.CheckoutBranch(snapshotBranch); err != nil {
+	// Create temporary worktree for snapshot
+	worktreePath := filepath.Join(os.TempDir(), fmt.Sprintf("context-snapshot-%d", timestamp.Unix()))
+	fmt.Printf("Creating worktree: %s\n", worktreePath)
+
+	if err := git.CreateWorktree(worktreePath, snapshotBranch); err != nil {
 		return err
 	}
 
-	// Ensure we return to original branch on error
+	// Ensure we clean up the worktree
 	defer func() {
-		if err := git.CheckoutBranch(currentBranch); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to return to branch %s: %v\n", currentBranch, err)
+		if err := git.RemoveWorktree(worktreePath); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove worktree: %v\n", err)
 		}
 	}()
 
-	// Create research directory
+	// Create research directory in worktree
 	researchPath := models.ResearchPath(timestamp, topic)
-	if err := os.MkdirAll(researchPath, 0755); err != nil {
+	worktreeResearchPath := filepath.Join(worktreePath, researchPath)
+	if err := os.MkdirAll(worktreeResearchPath, 0755); err != nil {
 		return fmt.Errorf("failed to create research directory: %w", err)
 	}
 
-	// Create placeholder files
-	notesPath := filepath.Join(researchPath, "notes.md")
+	// Create notes.md
+	notesPath := filepath.Join(worktreeResearchPath, "notes.md")
 	notesContent := fmt.Sprintf("# %s\n\nCreated: %s\nBranch: %s\nCommit: %s\n\n## Notes\n\n%s\n",
 		topic, timestamp.Format(time.RFC3339), currentBranch, currentCommit, saveNotes)
 	if err := os.WriteFile(notesPath, []byte(notesContent), 0644); err != nil {
@@ -151,7 +155,7 @@ func runSave(cmd *cobra.Command, args []string) error {
 	}
 
 	// Save metadata
-	metaPath := models.MetadataPath(timestamp, topic)
+	metaPath := filepath.Join(worktreeResearchPath, "meta.json")
 	metaBytes, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
@@ -160,22 +164,22 @@ func runSave(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write metadata: %w", err)
 	}
 
-	// Handle different modes
+	// Handle different modes in the worktree
 	switch mode {
 	case models.ModeFull:
 		// Full snapshot - everything is already there
 		// Just add research directory
-		if err := git.AddFiles(researchPath); err != nil {
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
 			return err
 		}
 
 	case models.ModeResearchOnly:
 		// Research only - remove everything except research/
 		fmt.Println("  Removing code files (research-only mode)...")
-		if err := git.RemoveAllFilesFromIndex(); err != nil {
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
 			return err
 		}
-		if err := git.AddFiles(researchPath); err != nil {
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
 			return err
 		}
 
@@ -185,15 +189,15 @@ func runSave(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("failed to get diff: %w", err)
 		}
-		patchPath := filepath.Join(researchPath, "changes.patch")
+		patchPath := filepath.Join(worktreeResearchPath, "changes.patch")
 		if err := os.WriteFile(patchPath, []byte(diff), 0644); err != nil {
 			return fmt.Errorf("failed to write patch: %w", err)
 		}
 		fmt.Println("  Removing code files (diff mode - patch only)...")
-		if err := git.RemoveAllFilesFromIndex(); err != nil {
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
 			return err
 		}
-		if err := git.AddFiles(researchPath); err != nil {
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
 			return err
 		}
 
@@ -203,27 +207,27 @@ func runSave(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("poc mode requires --include flag to specify files")
 		}
 		fmt.Println("  Removing code files (poc mode - selective inclusion)...")
-		if err := git.RemoveAllFilesFromIndex(); err != nil {
+		if err := git.RemoveAllFilesFromIndexInDir(worktreePath); err != nil {
 			return err
 		}
-		if err := git.AddFiles(researchPath); err != nil {
+		if err := git.AddFilesInDir(worktreePath, researchPath); err != nil {
 			return err
 		}
-		if err := git.AddFiles(saveInclude...); err != nil {
+		if err := git.AddFilesInDir(worktreePath, saveInclude...); err != nil {
 			return err
 		}
 	}
 
-	// Commit the snapshot
+	// Commit the snapshot in the worktree
 	commitMsg := fmt.Sprintf("snapshot: %s\n\nMode: %s\nFrom: %s @ %s\nTags: %v",
 		topic, mode, currentBranch, currentCommit[:8], saveTags)
-	if err := git.Commit(commitMsg); err != nil {
+	if err := git.CommitInDir(worktreePath, commitMsg); err != nil {
 		return fmt.Errorf("failed to commit snapshot: %w", err)
 	}
 
 	fmt.Printf("\n✓ Snapshot created: %s\n", snapshotBranch)
 	fmt.Printf("  Research: %s\n", researchPath)
-	fmt.Printf("  Metadata: %s\n", metaPath)
+	fmt.Printf("  Metadata: %s\n", models.MetadataPath(timestamp, topic))
 
 	return nil
 }

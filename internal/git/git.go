@@ -66,6 +66,15 @@ func CheckoutBranch(branch string) error {
 	return nil
 }
 
+// CheckoutBranchForce checks out a branch with force flag
+func CheckoutBranchForce(branch string) error {
+	cmd := exec.Command("git", "checkout", "-f", branch)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to force checkout branch %s: %w", branch, err)
+	}
+	return nil
+}
+
 // AddFiles stages files for commit
 func AddFiles(files ...string) error {
 	args := append([]string{"add"}, files...)
@@ -129,6 +138,16 @@ func CreateWorktree(path, branch string) error {
 	return nil
 }
 
+// RemoveWorktree removes a git worktree (with force to handle untracked files)
+func RemoveWorktree(path string) error {
+	cmd := exec.Command("git", "worktree", "remove", "--force", path)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to remove worktree: %s: %w", string(output), err)
+	}
+	return nil
+}
+
 // GetDiff returns the diff between current state and a commit
 func GetDiff(commit string) (string, error) {
 	cmd := exec.Command("git", "diff", commit)
@@ -163,6 +182,37 @@ func RemoveUntrackedFiles() error {
 	cmd := exec.Command("git", "clean", "-fd")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to remove untracked files: %w", err)
+	}
+	return nil
+}
+
+// AddFilesInDir stages files for commit in a specific directory
+func AddFilesInDir(dir string, files ...string) error {
+	args := append([]string{"add"}, files...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to add files: %w", err)
+	}
+	return nil
+}
+
+// CommitInDir creates a commit with the given message in a specific directory
+func CommitInDir(dir, message string) error {
+	cmd := exec.Command("git", "commit", "-m", message)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to commit: %w", err)
+	}
+	return nil
+}
+
+// RemoveAllFilesFromIndexInDir removes all files from the git index in a specific directory
+func RemoveAllFilesFromIndexInDir(dir string) error {
+	cmd := exec.Command("git", "rm", "-r", "--cached", ".")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove files from index: %w", err)
 	}
 	return nil
 }
