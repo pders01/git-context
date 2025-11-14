@@ -24,4 +24,5 @@ type Metadata struct {
 	Embedding     string       `json:"embedding,omitempty"`
 	Notes         string       `json:"notes,omitempty"`
 	TreeHash      string       `json:"tree_hash,omitempty"` // For immutability verification
+	RelatedTo     []string     `json:"related_to,omitempty"` // References to related snapshot branches
 }

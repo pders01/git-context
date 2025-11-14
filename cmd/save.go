@@ -25,6 +25,7 @@ var (
 	saveNoEmbed    bool
 	saveNotes      string
 	saveBatch      string
+	saveRelatedTo  []string
 )
 
 var saveCmd = &cobra.Command{
@@ -55,6 +56,7 @@ func init() {
 	saveCmd.Flags().StringVar(&saveMode, "mode", "", "Snapshot mode: full|research-only|diff|poc")
 	saveCmd.Flags().StringSliceVar(&saveInclude, "include", []string{}, "Extra files to include")
 	saveCmd.Flags().StringSliceVar(&saveTags, "tag", []string{}, "Add metadata tags")
+	saveCmd.Flags().StringSliceVar(&saveRelatedTo, "related-to", []string{}, "Related snapshot branches")
 	saveCmd.Flags().BoolVar(&saveNoEmbed, "no-embed", false, "Skip embedding generation")
 	saveCmd.Flags().StringVar(&saveNotes, "notes", "", "Optional notes")
 	saveCmd.Flags().StringVar(&saveBatch, "batch", "", "Batch create snapshots from TOML config file")
@@ -67,12 +69,13 @@ type batchConfig struct {
 
 // snapshotSpec defines a single snapshot in batch mode
 type snapshotSpec struct {
-	Topic    string   `toml:"topic"`
-	Mode     string   `toml:"mode"`
-	Include  []string `toml:"include"`
-	Tags     []string `toml:"tags"`
-	Notes    string   `toml:"notes"`
-	NoEmbed  bool     `toml:"no_embed"`
+	Topic     string   `toml:"topic"`
+	Mode      string   `toml:"mode"`
+	Include   []string `toml:"include"`
+	Tags      []string `toml:"tags"`
+	Notes     string   `toml:"notes"`
+	NoEmbed   bool     `toml:"no_embed"`
+	RelatedTo []string `toml:"related_to"`
 }
 
 func runSave(cmd *cobra.Command, args []string) error {
@@ -182,6 +185,7 @@ func runSave(cmd *cobra.Command, args []string) error {
 		Tags:          saveTags,
 		Notes:         saveNotes,
 		TreeHash:      treeHash,
+		RelatedTo:     saveRelatedTo,
 	}
 
 	// Save metadata
@@ -514,6 +518,7 @@ func createSnapshot(spec snapshotSpec) error {
 		Tags:          spec.Tags,
 		Notes:         spec.Notes,
 		TreeHash:      treeHash,
+		RelatedTo:     spec.RelatedTo,
 	}
 
 	// Save metadata

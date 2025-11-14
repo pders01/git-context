@@ -15,23 +15,28 @@ import (
 )
 
 var (
-	listTopic string
-	listToday bool
-	listSince string
-	listJSON  bool
-	listToon  bool
+	listTopic   string
+	listToday   bool
+	listSince   string
+	listJSON    bool
+	listToon    bool
+	listTag     string
+	listGroupBy string
 )
 
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all context snapshots",
-	Long: `List all context snapshots with optional filtering.
+	Long: `List all context snapshots with optional filtering and grouping.
 
 Examples:
   context list
   context list --topic security
+  context list --tag important
   context list --today
-  context list --since 2025-10-01`,
+  context list --since 2025-10-01
+  context list --group-by tag
+  context list --group-by date`,
 	RunE: runList,
 }
 
@@ -39,8 +44,10 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 
 	listCmd.Flags().StringVar(&listTopic, "topic", "", "Filter by topic")
+	listCmd.Flags().StringVar(&listTag, "tag", "", "Filter by tag")
 	listCmd.Flags().BoolVar(&listToday, "today", false, "Show only today's snapshots")
 	listCmd.Flags().StringVar(&listSince, "since", "", "Show snapshots since date (YYYY-MM-DD)")
+	listCmd.Flags().StringVar(&listGroupBy, "group-by", "", "Group output by: tag, date, or mode")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
 	listCmd.Flags().BoolVar(&listToon, "toon", false, "Output in LLM-friendly toon format")
 }
@@ -119,6 +126,32 @@ func runList(cmd *cobra.Command, args []string) error {
 		snapshots[i].LoadMetadata()
 	}
 
+	// Apply tag filter (needs metadata loaded)
+	if listTag != "" {
+		var filtered []snapshotInfo
+		for _, s := range snapshots {
+			if s.Metadata != nil {
+				for _, tag := range s.Metadata.Tags {
+					if tag == listTag {
+						filtered = append(filtered, s)
+						break
+					}
+				}
+			}
+		}
+		snapshots = filtered
+	}
+
+	if len(snapshots) == 0 {
+		fmt.Println("No snapshots match the filter criteria")
+		return nil
+	}
+
+	// Handle grouping if requested
+	if listGroupBy != "" && !listJSON && !listToon {
+		return displayGrouped(snapshots, listGroupBy)
+	}
+
 	// Output JSON if requested
 	if listJSON {
 		output, err := json.MarshalIndent(snapshots, "", "  ")
@@ -168,6 +201,149 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// displayGrouped shows snapshots grouped by a specified field
+func displayGrouped(snapshots []snapshotInfo, groupBy string) error {
+	switch groupBy {
+	case "tag":
+		return displayGroupedByTag(snapshots)
+	case "date":
+		return displayGroupedByDate(snapshots)
+	case "mode":
+		return displayGroupedByMode(snapshots)
+	default:
+		return fmt.Errorf("invalid group-by value: %s (must be: tag, date, or mode)", groupBy)
+	}
+}
+
+// displayGroupedByTag groups snapshots by their tags
+func displayGroupedByTag(snapshots []snapshotInfo) error {
+	// Collect all tags and group snapshots
+	tagMap := make(map[string][]snapshotInfo)
+	untagged := []snapshotInfo{}
+
+	for _, s := range snapshots {
+		if s.Metadata == nil || len(s.Metadata.Tags) == 0 {
+			untagged = append(untagged, s)
+			continue
+		}
+		for _, tag := range s.Metadata.Tags {
+			tagMap[tag] = append(tagMap[tag], s)
+		}
+	}
+
+	// Sort tags alphabetically
+	var tags []string
+	for tag := range tagMap {
+		tags = append(tags, tag)
+	}
+	sort.Strings(tags)
+
+	// Display groups
+	fmt.Printf("Found %d snapshot(s) grouped by tag:\n\n", len(snapshots))
+
+	for _, tag := range tags {
+		fmt.Printf("━━━ %s (%d) ━━━\n\n", tag, len(tagMap[tag]))
+		for _, s := range tagMap[tag] {
+			displaySnapshot(s, "  ")
+		}
+	}
+
+	if len(untagged) > 0 {
+		fmt.Printf("━━━ (untagged) (%d) ━━━\n\n", len(untagged))
+		for _, s := range untagged {
+			displaySnapshot(s, "  ")
+		}
+	}
+
+	return nil
+}
+
+// displayGroupedByDate groups snapshots by date
+func displayGroupedByDate(snapshots []snapshotInfo) error {
+	dateMap := make(map[string][]snapshotInfo)
+
+	for _, s := range snapshots {
+		date := s.Timestamp.Format("2006-01-02")
+		dateMap[date] = append(dateMap[date], s)
+	}
+
+	// Sort dates
+	var dates []string
+	for date := range dateMap {
+		dates = append(dates, date)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
+
+	// Display groups
+	fmt.Printf("Found %d snapshot(s) grouped by date:\n\n", len(snapshots))
+
+	for _, date := range dates {
+		fmt.Printf("━━━ %s (%d) ━━━\n\n", date, len(dateMap[date]))
+		for _, s := range dateMap[date] {
+			displaySnapshot(s, "  ")
+		}
+	}
+
+	return nil
+}
+
+// displayGroupedByMode groups snapshots by mode
+func displayGroupedByMode(snapshots []snapshotInfo) error {
+	modeMap := make(map[string][]snapshotInfo)
+
+	for _, s := range snapshots {
+		mode := "unknown"
+		if s.Metadata != nil {
+			mode = string(s.Metadata.Mode)
+		}
+		modeMap[mode] = append(modeMap[mode], s)
+	}
+
+	// Sort modes
+	var modes []string
+	for mode := range modeMap {
+		modes = append(modes, mode)
+	}
+	sort.Strings(modes)
+
+	// Display groups
+	fmt.Printf("Found %d snapshot(s) grouped by mode:\n\n", len(snapshots))
+
+	for _, mode := range modes {
+		fmt.Printf("━━━ %s (%d) ━━━\n\n", mode, len(modeMap[mode]))
+		for _, s := range modeMap[mode] {
+			displaySnapshot(s, "  ")
+		}
+	}
+
+	return nil
+}
+
+// displaySnapshot shows a single snapshot with indentation
+func displaySnapshot(s snapshotInfo, indent string) {
+	fmt.Printf("%s%s\n", indent, s.Branch)
+	fmt.Printf("%s  Topic:   %s\n", indent, s.Topic)
+	fmt.Printf("%s  Created: %s\n", indent, s.Timestamp.Format("2006-01-02 15:04"))
+
+	if meta := s.Metadata; meta != nil {
+		fmt.Printf("%s  Mode:    %s\n", indent, meta.Mode)
+		if len(meta.Tags) > 0 {
+			fmt.Printf("%s  Tags:    %v\n", indent, meta.Tags)
+		}
+		if meta.Notes != "" {
+			notes := meta.Notes
+			if len(notes) > 60 {
+				notes = notes[:60] + "..."
+			}
+			fmt.Printf("%s  Notes:   %s\n", indent, notes)
+		}
+		if s.HasEmbedding {
+			fmt.Printf("%s  Embedding: ✓\n", indent)
+		}
+	}
+	fmt.Println()
 }
 
 type snapshotInfo struct {

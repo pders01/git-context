@@ -1,0 +1,22 @@
+# Security research workflow example
+
+[[snapshot]]
+topic = "initial-reconnaissance"
+mode = "research-only"
+tags = ["security", "recon"]
+notes = "Initial code review identified potential issues with git command execution in internal/git/git.go. Commands constructed with user input should be reviewed for injection risks."
+no_embed = true
+
+[[snapshot]]
+topic = "vulnerability-analysis"
+mode = "research-only"
+tags = ["security", "vulnerability", "important"]
+notes = "Analyzed git.go - confirmed commands use exec.Command properly with separate args, not shell execution. No injection risk found. Safe implementation."
+no_embed = true
+
+[[snapshot]]
+topic = "feature-enhancement-plan"
+mode = "research-only"
+tags = ["planning", "enhancement"]
+notes = "Planned three enhancements: JSON/Toon output for agents, boolean search operators, and batch snapshot creation. All aimed at improving agent UX."
+no_embed = true
