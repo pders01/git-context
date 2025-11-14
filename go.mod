@@ -1,4 +1,4 @@
-module github.com/paulderscheid/git-context
+module github.com/pders01/git-context
 
 go 1.25.4
 

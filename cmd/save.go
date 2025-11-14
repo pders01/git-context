@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/paulderscheid/git-context/internal/config"
-	"github.com/paulderscheid/git-context/internal/embeddings"
-	"github.com/paulderscheid/git-context/internal/git"
-	"github.com/paulderscheid/git-context/internal/models"
-	"github.com/paulderscheid/git-context/internal/ollama"
+	"github.com/pders01/git-context/internal/config"
+	"github.com/pders01/git-context/internal/embeddings"
+	"github.com/pders01/git-context/internal/git"
+	"github.com/pders01/git-context/internal/models"
+	"github.com/pders01/git-context/internal/ollama"
 	"github.com/spf13/cobra"
 )
 

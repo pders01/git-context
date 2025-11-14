@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/paulderscheid/git-context/internal/git"
+	"github.com/pders01/git-context/internal/git"
 	"github.com/spf13/cobra"
 )
 

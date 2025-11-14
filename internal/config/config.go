@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/paulderscheid/git-context/internal/models"
+	"github.com/pders01/git-context/internal/models"
 	"github.com/spf13/viper"
 )
 

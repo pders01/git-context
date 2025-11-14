@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/paulderscheid/git-context/internal/testutil"
+	"github.com/pders01/git-context/internal/testutil"
 )
 
 func TestArchiveNoSnapshots(t *testing.T) {

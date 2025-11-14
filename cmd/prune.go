@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/paulderscheid/git-context/internal/config"
-	"github.com/paulderscheid/git-context/internal/git"
-	"github.com/paulderscheid/git-context/internal/models"
+	"github.com/pders01/git-context/internal/config"
+	"github.com/pders01/git-context/internal/git"
+	"github.com/pders01/git-context/internal/models"
 	"github.com/spf13/cobra"
 )
 

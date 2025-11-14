@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paulderscheid/git-context/internal/testutil"
+	"github.com/pders01/git-context/internal/testutil"
 )
 
 func TestPruneNoSnapshots(t *testing.T) {
