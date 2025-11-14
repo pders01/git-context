@@ -34,7 +34,7 @@ func Execute() {
 func init() {
 	cobra.OnInitialize(initConfig)
 
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/context/config.toml)")
+	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/git-context/config.toml)")
 }
 
 func initConfig() {
@@ -47,7 +47,7 @@ func initConfig() {
 			os.Exit(1)
 		}
 
-		configDir := filepath.Join(home, ".config", "context")
+		configDir := filepath.Join(home, ".config", "git-context")
 		viper.AddConfigPath(configDir)
 		viper.SetConfigType("toml")
 		viper.SetConfigName("config")

@@ -285,7 +285,7 @@ context prune
 context prune --force
 ```
 
-Configurable via `~/.config/context/config.toml`:
+Configurable via `~/.config/git-context/config.toml`:
 ```toml
 [retention]
 days = 90
@@ -385,7 +385,7 @@ Snapshots automatically generate embeddings when created. Search uses hybrid app
 context search "authentication vulnerabilities"
 
 # Configure weights
-~/.config/context/config.toml:
+~/.config/git-context/config.toml:
 [search]
 keyword_weight = 0.3
 semantic_weight = 0.7
@@ -395,7 +395,7 @@ Gracefully degrades to keyword-only when Ollama unavailable.
 
 ## Configuration
 
-Create `~/.config/context/config.toml`:
+Create `~/.config/git-context/config.toml`:
 
 ```toml
 [retention]

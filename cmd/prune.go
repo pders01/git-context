@@ -21,7 +21,7 @@ var pruneCmd = &cobra.Command{
 	Short: "Remove old snapshots based on retention policy",
 	Long: `Remove snapshots older than the retention period.
 
-The retention policy is configured in ~/.config/context/config.toml:
+The retention policy is configured in ~/.config/git-context/config.toml:
   [retention]
   days = 90
   preserve_tags = ["important", "security"]

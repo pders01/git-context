@@ -233,7 +233,7 @@ viper.SetDefault("search.keyword_weight", 0.3)
 viper.SetDefault("search.semantic_weight", 0.7)
 ```
 
-Config file: `~/.config/context/config.toml`
+Config file: `~/.config/git-context/config.toml`
 
 ### Shared Helper Functions
 
