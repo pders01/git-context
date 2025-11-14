@@ -171,7 +171,10 @@ func runSave(cmd *cobra.Command, args []string) error {
 
 	case models.ModeResearchOnly:
 		// Research only - remove everything except research/
-		// TODO: Implement selective removal
+		fmt.Println("  Removing code files (research-only mode)...")
+		if err := git.RemoveAllFilesFromIndex(); err != nil {
+			return err
+		}
 		if err := git.AddFiles(researchPath); err != nil {
 			return err
 		}
@@ -186,19 +189,28 @@ func runSave(cmd *cobra.Command, args []string) error {
 		if err := os.WriteFile(patchPath, []byte(diff), 0644); err != nil {
 			return fmt.Errorf("failed to write patch: %w", err)
 		}
+		fmt.Println("  Removing code files (diff mode - patch only)...")
+		if err := git.RemoveAllFilesFromIndex(); err != nil {
+			return err
+		}
 		if err := git.AddFiles(researchPath); err != nil {
 			return err
 		}
 
 	case models.ModePOC:
 		// POC mode - only include specified files
+		if len(saveInclude) == 0 {
+			return fmt.Errorf("poc mode requires --include flag to specify files")
+		}
+		fmt.Println("  Removing code files (poc mode - selective inclusion)...")
+		if err := git.RemoveAllFilesFromIndex(); err != nil {
+			return err
+		}
 		if err := git.AddFiles(researchPath); err != nil {
 			return err
 		}
-		if len(saveInclude) > 0 {
-			if err := git.AddFiles(saveInclude...); err != nil {
-				return err
-			}
+		if err := git.AddFiles(saveInclude...); err != nil {
+			return err
 		}
 	}
 

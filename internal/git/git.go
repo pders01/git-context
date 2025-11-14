@@ -148,3 +148,21 @@ func HasUncommittedChanges() (bool, error) {
 	}
 	return len(strings.TrimSpace(string(output))) > 0, nil
 }
+
+// RemoveAllFilesFromIndex removes all files from the git index (staging area)
+func RemoveAllFilesFromIndex() error {
+	cmd := exec.Command("git", "rm", "-r", "--cached", ".")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove files from index: %w", err)
+	}
+	return nil
+}
+
+// RemoveUntrackedFiles removes all untracked files and directories
+func RemoveUntrackedFiles() error {
+	cmd := exec.Command("git", "clean", "-fd")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove untracked files: %w", err)
+	}
+	return nil
+}
