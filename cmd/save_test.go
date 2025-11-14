@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/paulderscheid/git-context/internal/models"
-	"github.com/paulderscheid/git-context/internal/testutil"
+	"github.com/pders01/git-context/internal/models"
+	"github.com/pders01/git-context/internal/testutil"
 )
 
 func TestSaveFullMode(t *testing.T) {
@@ -253,5 +253,168 @@ func TestSaveImmutability(t *testing.T) {
 
 	if snapshotCount != 1 {
 		t.Errorf("expected 1 snapshot branch, got %d", snapshotCount)
+	}
+}
+
+func TestSaveWithEmbeddingsDisabled(t *testing.T) {
+	repo := testutil.NewTempGitRepo(t)
+	defer repo.Cleanup()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repo.Path)
+	defer os.Chdir(oldWd)
+
+	repo.CreateFile("main.go", "package main\n")
+	repo.Commit("Add test file")
+
+	// Save with embeddings disabled via flag
+	saveTopic = ""
+	saveMode = "full"
+	saveTags = []string{}
+	saveNotes = "Test without embeddings"
+	saveNoEmbed = true
+	saveInclude = []string{}
+
+	err := runSave(nil, []string{"no-embed-test"})
+	if err != nil {
+		t.Fatalf("save command failed: %v", err)
+	}
+
+	// Find snapshot branch
+	branches := repo.GetBranches()
+	var snapshotBranch string
+	for _, branch := range branches {
+		if strings.Contains(branch, "snapshot") && strings.Contains(branch, "no-embed-test") {
+			snapshotBranch = branch
+			break
+		}
+	}
+
+	if snapshotBranch == "" {
+		t.Fatalf("snapshot branch not created")
+	}
+
+	// Verify metadata doesn't reference an embedding
+	metaContent := repo.GetFileContent(snapshotBranch, "research/"+strings.Split(snapshotBranch, "/")[1]+"/no-embed-test/meta.json")
+	var meta models.Metadata
+	if err := json.Unmarshal([]byte(metaContent), &meta); err != nil {
+		t.Fatalf("failed to parse metadata: %v", err)
+	}
+
+	if meta.Embedding != "" {
+		t.Errorf("expected no embedding reference, got '%s'", meta.Embedding)
+	}
+
+	// Verify embedding file doesn't exist
+	if repo.FileExists(snapshotBranch, "research/"+strings.Split(snapshotBranch, "/")[1]+"/no-embed-test/embedding.bin") {
+		t.Error("embedding.bin should not exist when embeddings are disabled")
+	}
+}
+
+func TestSaveWithOllamaUnavailable(t *testing.T) {
+	repo := testutil.NewTempGitRepo(t)
+	defer repo.Cleanup()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repo.Path)
+	defer os.Chdir(oldWd)
+
+	repo.CreateFile("main.go", "package main\n")
+	repo.Commit("Add test file")
+
+	// Save with embeddings enabled but Ollama not available
+	// (it will gracefully degrade and just warn)
+	saveTopic = ""
+	saveMode = "full"
+	saveTags = []string{}
+	saveNotes = "Test with Ollama unavailable"
+	saveNoEmbed = false // Enable embeddings
+	saveInclude = []string{}
+
+	// This should succeed even if Ollama is not available
+	// (graceful degradation)
+	err := runSave(nil, []string{"ollama-unavail-test"})
+	if err != nil {
+		t.Fatalf("save command failed: %v", err)
+	}
+
+	// Find snapshot branch
+	branches := repo.GetBranches()
+	var snapshotBranch string
+	for _, branch := range branches {
+		if strings.Contains(branch, "snapshot") && strings.Contains(branch, "ollama-unavail-test") {
+			snapshotBranch = branch
+			break
+		}
+	}
+
+	if snapshotBranch == "" {
+		t.Fatalf("snapshot branch not created")
+	}
+
+	// Snapshot should still be created successfully
+	// (embedding generation failure doesn't fail the snapshot)
+}
+
+func TestBuildEmbeddingText(t *testing.T) {
+	metadata := &models.Metadata{
+		Topic: "test-topic",
+		Tags:  []string{"tag1", "tag2"},
+		Notes: "Short notes",
+	}
+
+	notesContent := "# Test\n\nDetailed notes content"
+
+	result := buildEmbeddingText(metadata, notesContent)
+
+	// Verify all components are included
+	if !strings.Contains(result, "test-topic") {
+		t.Error("embedding text should contain topic")
+	}
+	if !strings.Contains(result, "tag1") {
+		t.Error("embedding text should contain tags")
+	}
+	if !strings.Contains(result, "Short notes") {
+		t.Error("embedding text should contain notes from metadata")
+	}
+	if !strings.Contains(result, "Detailed notes content") {
+		t.Error("embedding text should contain notes.md content")
+	}
+}
+
+func TestSlugify(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{
+			input:    "Simple Test",
+			expected: "simple-test",
+		},
+		{
+			input:    "With Special! Characters?",
+			expected: "with-special-characters",
+		},
+		{
+			input:    "Multiple   Spaces",
+			expected: "multiple---spaces", // Multiple spaces become multiple hyphens
+		},
+		{
+			input:    "UPPERCASE",
+			expected: "uppercase",
+		},
+		{
+			input:    "numbers-123",
+			expected: "numbers-123",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := slugify(tt.input)
+			if result != tt.expected {
+				t.Errorf("expected '%s', got '%s'", tt.expected, result)
+			}
+		})
 	}
 }

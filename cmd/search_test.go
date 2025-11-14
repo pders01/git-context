@@ -4,7 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/paulderscheid/git-context/internal/testutil"
+	"github.com/pders01/git-context/internal/models"
+	"github.com/pders01/git-context/internal/testutil"
 )
 
 func TestSearchNoSnapshots(t *testing.T) {
@@ -98,4 +99,197 @@ func TestSearchNoMatches(t *testing.T) {
 	if err != nil {
 		t.Fatalf("search command failed: %v", err)
 	}
+}
+
+func TestCalculateRelevance(t *testing.T) {
+	tests := []struct {
+		name      string
+		query     string
+		metadata  *models.Metadata
+		minScore  int // Minimum expected score
+	}{
+		{
+			name:  "exact topic match",
+			query: "security",
+			metadata: &models.Metadata{
+				Topic: "security",
+				Notes: "",
+				Tags:  []string{},
+			},
+			minScore: 50, // Bonus for topic match
+		},
+		{
+			name:  "tag match",
+			query: "bug",
+			metadata: &models.Metadata{
+				Topic: "test",
+				Notes: "",
+				Tags:  []string{"bug", "feature"},
+			},
+			minScore: 30, // Bonus for tag match
+		},
+		{
+			name:  "notes match",
+			query: "vulnerability",
+			metadata: &models.Metadata{
+				Topic: "security",
+				Notes: "Found vulnerability in authentication",
+				Tags:  []string{},
+			},
+			minScore: 10, // Word occurrence
+		},
+		{
+			name:  "multiple word match",
+			query: "security vulnerability",
+			metadata: &models.Metadata{
+				Topic: "security",
+				Notes: "Found vulnerability in authentication",
+				Tags:  []string{"security"},
+			},
+			minScore: 100, // Multiple matches across fields
+		},
+		{
+			name:  "no match",
+			query: "xyz",
+			metadata: &models.Metadata{
+				Topic: "test",
+				Notes: "Some notes",
+				Tags:  []string{"tag"},
+			},
+			minScore: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queryWords := splitQueryWords(tt.query)
+			score := calculateRelevance(queryWords, tt.metadata)
+
+			if score < tt.minScore {
+				t.Errorf("expected score >= %d, got %d", tt.minScore, score)
+			}
+		})
+	}
+}
+
+func TestSearchRanking(t *testing.T) {
+	repo := testutil.NewTempGitRepo(t)
+	defer repo.Cleanup()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repo.Path)
+	defer os.Chdir(oldWd)
+
+	// Create snapshots with different relevance levels
+	// Snapshot 1: High relevance (exact topic match)
+	saveTopic = ""
+	saveMode = "full"
+	saveTags = []string{}
+	saveNotes = ""
+	saveNoEmbed = true
+	saveInclude = []string{}
+	runSave(nil, []string{"security"})
+
+	// Snapshot 2: Medium relevance (tag match)
+	saveTags = []string{"security"}
+	saveNotes = ""
+	runSave(nil, []string{"feature-test"})
+
+	// Snapshot 3: Low relevance (only in notes)
+	saveTags = []string{}
+	saveNotes = "Mentioned security in passing"
+	runSave(nil, []string{"unrelated"})
+
+	// Search should rank them appropriately
+	searchTopic = ""
+	err := runSearch(nil, []string{"security"})
+	if err != nil {
+		t.Fatalf("search command failed: %v", err)
+	}
+
+	// Note: We can't easily verify the order without capturing output
+	// This test at least verifies the search completes successfully
+}
+
+func TestSearchKeywordOnly(t *testing.T) {
+	repo := testutil.NewTempGitRepo(t)
+	defer repo.Cleanup()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repo.Path)
+	defer os.Chdir(oldWd)
+
+	// Create snapshot without embeddings
+	createTestSnapshot(t, "test-topic", "full", []string{"test"})
+
+	// Search should work with keyword-only mode
+	// (since Ollama is likely not available in test environment)
+	searchTopic = ""
+	err := runSearch(nil, []string{"test"})
+	if err != nil {
+		t.Fatalf("search command failed: %v", err)
+	}
+
+	// Search completes successfully even without embeddings
+}
+
+func TestSearchEmptyQuery(t *testing.T) {
+	repo := testutil.NewTempGitRepo(t)
+	defer repo.Cleanup()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(repo.Path)
+	defer os.Chdir(oldWd)
+
+	createTestSnapshot(t, "test-topic", "full", []string{})
+
+	// Even with empty query words (after processing),
+	// search should not crash
+	searchTopic = ""
+	err := runSearch(nil, []string{" "})
+	if err != nil {
+		t.Fatalf("search command failed: %v", err)
+	}
+}
+
+// Helper function to split query into words (mimics search.go logic)
+func splitQueryWords(query string) []string {
+	words := []string{}
+	for _, word := range splitWords(query) {
+		if word != "" {
+			words = append(words, toLowerCase(word))
+		}
+	}
+	return words
+}
+
+func splitWords(s string) []string {
+	var words []string
+	current := ""
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' || s[i] == '\t' || s[i] == '\n' {
+			if current != "" {
+				words = append(words, current)
+				current = ""
+			}
+		} else {
+			current += string(s[i])
+		}
+	}
+	if current != "" {
+		words = append(words, current)
+	}
+	return words
+}
+
+func toLowerCase(s string) string {
+	result := ""
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c = c + ('a' - 'A')
+		}
+		result += string(c)
+	}
+	return result
 }
